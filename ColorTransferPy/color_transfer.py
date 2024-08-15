@@ -1,3 +1,7 @@
+from check_and_install_requirements import check_and_install_requirements
+
+check_and_install_requirements()
+
 from PIL import Image
 import cv2
 import numpy as np
