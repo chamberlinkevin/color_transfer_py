@@ -7,18 +7,6 @@ import cv2
 import numpy as np
 import colorsys
 
-def image_to_hsl(image_path):
-    image = Image.open(image_path)
-    pixels = list(image.getdata())
-    hsl_pixels = [colorsys.rgb_to_hls(*[x/255.0 for x in pixel]) for pixel in pixels]
-    return hsl_pixels
-
-def hsl_to_image(hsl_pixels, size):
-    rgb_pixels = [tuple(int(x * 255) for x in colorsys.hls_to_rgb(*pixel)) for pixel in hsl_pixels]
-    image = Image.new('RGB', size)
-    image.putdata(rgb_pixels)
-    return image
-
 def standardize_array(array):
     """Standardizes the input array by scaling to zero mean and unit variance."""
     mean = np.mean(array, axis=(0, 1), keepdims=True)
@@ -27,42 +15,50 @@ def standardize_array(array):
     return standardized_array
 
 def transfer_image_colors(source_image_path, target_image_path, output_image_path):
-    # Read source and target images
+    """Transfers color characteristics from target image to source image."""
+    # Load images
     source_image = cv2.imread(source_image_path)
     target_image = cv2.imread(target_image_path)
 
     if source_image is None or target_image is None:
         raise FileNotFoundError("One of the image files was not found or could not be read.")
-
+    
     # Convert images to float32 for precision
     source_image = source_image.astype(np.float32) / 255.0
     target_image = target_image.astype(np.float32) / 255.0
 
-    # Convert source image to HLS
+    # Convert images from BGR to HLS color space
     source_hls = cv2.cvtColor(source_image, cv2.COLOR_BGR2HLS)
-    
-    # Extract H, L, and S channels from source image
-    source_h, source_l, source_s = cv2.split(source_hls)
-
-    # Convert target image to HLS
     target_hls = cv2.cvtColor(target_image, cv2.COLOR_BGR2HLS)
 
-    # Standardize the HLS channels of the target image
-    target_hls_standardized = standardize_array(target_hls)
+    # Separate the H, L, S channels
+    source_hue, source_lightness, source_saturation = cv2.split(source_hls)
+    target_hue, target_lightness, target_saturation = cv2.split(target_hls)
 
-    # Compute mean and std of source HLS channels
-    source_mean = np.mean(source_hls, axis=(0, 1), keepdims=True)
-    source_std = np.std(source_hls, axis=(0, 1), keepdims=True)
+    # Standardize lightness and saturation, but NOT hue
+    source_lightness_standardized = standardize_array(source_lightness)
+    source_saturation_standardized = standardize_array(source_saturation)
 
-    # Standardize the source HLS channels
-    source_hls_standardized = standardize_array(source_hls)
+    # Get mean and std of target lightness and saturation
+    target_lightness_mean = np.mean(target_lightness, axis=(0, 1), keepdims=True)
+    target_lightness_std = np.std(target_lightness, axis=(0, 1), keepdims=True)
 
-    # Transfer color characteristics
-    transferred_hls = source_hls_standardized * source_std + source_mean
-    transferred_hls = np.clip(transferred_hls, 0, 1)  # Clip to valid range
+    target_saturation_mean = np.mean(target_saturation, axis=(0, 1), keepdims=True)
+    target_saturation_std = np.std(target_saturation, axis=(0, 1), keepdims=True)
+
+    # Apply target's mean and std to standardized source lightness and saturation
+    transferred_lightness = source_lightness_standardized * target_lightness_std + target_lightness_mean
+    transferred_saturation = source_saturation_standardized * target_saturation_std + target_saturation_mean
+
+    # Clip lightness and saturation to valid range (0-255)
+    transferred_lightness = np.clip(transferred_lightness, 0, 255)
+    transferred_saturation = np.clip(transferred_saturation, 0, 255)
+
+    # Combine transferred H, L, S
+    transferred_hls = cv2.merge((source_hue, transferred_lightness, transferred_saturation))
 
     # Convert back to BGR color space
-    transferred_image = cv2.cvtColor(transferred_hls, cv2.COLOR_HLS2BGR)
+    transferred_image = cv2.cvtColor(transferred_hls.astype(np.float32), cv2.COLOR_HLS2BGR)
 
     # Convert image back to uint8
     transferred_image = (transferred_image * 255.0).astype(np.uint8)
